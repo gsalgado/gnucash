@@ -132,6 +132,10 @@ static void gtv_sr_refresh_view_cb (GncTreeModelSplitReg *model, gpointer user_d
 
 static gboolean gtv_sr_transaction_changed_confirm (GncTreeViewSplitReg *view, Transaction *new_trans);
 
+static gboolean account_name_match(GtkEntryCompletion *completion,
+                                   const gchar *key,
+                                   GtkTreeIter *iter,
+                                   gpointer user_data);
 
 typedef struct {
     ViewCol viewcol;
@@ -5116,7 +5120,11 @@ gtv_sr_acct_cb (GtkEntry    *entry,
         l_item = g_utf8_strdown (item_string, -1);
         l_entered_string = g_utf8_strdown (entered_string, -1);
 
-        if (g_str_has_prefix (l_item, l_entered_string))
+        // The same substring-matching done here has to be done on the
+        // entry completion's match_func (account_name_match), or else the
+        // drop-down will show different results from the auto-completion we
+        // do here.
+        if (g_strrstr (l_item, l_entered_string))
         {
             if (num_of_items == 0)
                 acct_string = g_strdup (item);
@@ -5124,6 +5132,9 @@ gtv_sr_acct_cb (GtkEntry    *entry,
             {
                 l_acct_string = g_utf8_strdown (acct_string, -1);
                 if (!g_str_has_prefix (g_utf8_strdown (l_item, -1), l_acct_string))
+                    // This is to signal that at least one of the matching
+                    // items doesn't share the same prefix as the others, so
+                    // we can't do auto-completion.
                     all_the_same = FALSE;
                 g_free (l_acct_string);
             }
@@ -5531,6 +5542,27 @@ gtv_sr_ed_key_press_cb (GtkWidget *widget, GdkEventKey *event, gpointer user_dat
     }
 }
 
+
+static gboolean
+account_name_match(GtkEntryCompletion *completion, const gchar *key,
+                   GtkTreeIter *iter, gpointer user_data)
+{
+    GtkTreeModel *model;
+    GncTreeViewSplitReg *view = GNC_TREE_VIEW_SPLIT_REG (user_data);
+    gchar *val;
+    model = gtk_entry_completion_get_model (completion);
+    if (view->priv->acct_short_names)
+        gtk_tree_model_get (model, iter, 0, &val, -1);
+    else
+        gtk_tree_model_get (model, iter, 1, &val, -1);
+    // The same substring match used here must be used in gtv_sr_type_cb.
+    if (g_strrstr(g_utf8_strdown (val, -1), g_utf8_strdown (key, -1))) {
+        return TRUE;
+    } else {
+        return FALSE;
+    }
+}
+
 /*###########################################################################*/
 
 /* The main Start Editing Call back for the TEXT columns */
@@ -5624,6 +5656,7 @@ gtv_sr_editable_start_editing_cb (GtkCellRenderer *cr, GtkCellEditable *editable
         else
             gtk_entry_completion_set_text_column (completion, 1);
 
+        gtk_entry_completion_set_match_func (completion, account_name_match, view, NULL);
         gtk_entry_completion_set_popup_completion (completion, TRUE);
         gtk_entry_completion_set_inline_selection (completion, TRUE);
         gtk_entry_completion_set_popup_set_width (completion, FALSE);
